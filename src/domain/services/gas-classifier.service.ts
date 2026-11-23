@@ -1,32 +1,42 @@
 // src/domain/services/gas-classifier.service.ts
+
 export type GasStatusType = 'NORMAL' | 'WARNING' | 'DANGER';
 
-export class GasClassifier {
-  private static readonly ADC_MIN = 0;
-  private static readonly ADC_MAX = 4095;
-  private static readonly WARNING_THRESHOLD = 500;
-  private static readonly DANGER_THRESHOLD = 750;
-  private static readonly HYSTERESIS_MARGIN = 30;
+export interface GasThresholdConfig {
+  warningThreshold: number;
+  dangerThreshold: number;
+  hysteresisMargin: number;
+  adcMaxValue: number;
+}
 
-  public static isValidRawValue(rawValue: number): boolean {
+export class GasClassifier {
+  private readonly config: GasThresholdConfig;
+
+  constructor(config: GasThresholdConfig) {
+    // Validasi invariant Domain: WARNING harus lebih kecil dari DANGER
+    if (config.warningThreshold >= config.dangerThreshold) {
+      throw new Error(
+        'Konfigurasi tidak valid: Warning threshold harus lebih kecil dari Danger threshold.',
+      );
+    }
+    this.config = config;
+  }
+
+  public isValidRawValue(rawValue: number): boolean {
     return (
       Number.isInteger(rawValue) &&
-      rawValue >= this.ADC_MIN &&
-      rawValue <= this.ADC_MAX
+      rawValue >= 0 &&
+      rawValue <= this.config.adcMaxValue
     );
   }
 
-  public static isValidCapturedAt(
+  public isValidCapturedAt(
     capturedAtStr: string,
     serverTime: Date = new Date(),
   ): boolean {
-    console.log('[RANJAU 2 - CLASSIFIER] Evaluating capturedAt:', capturedAtStr, 'Current System Time:', new Date());
-
     const date = new Date(capturedAtStr);
     if (isNaN(date.getTime())) return false;
 
-    // Batas toleransi waktu: capturedAt tidak boleh > 5 menit di masa depan
-    // dan tidak boleh > 24 jam di masa lalu (clock drift / invalid RTC)
     const maxFuture = serverTime.getTime() + 5 * 60 * 1000;
     const maxPast = serverTime.getTime() - 24 * 60 * 60 * 1000;
     const capTime = date.getTime();
@@ -34,14 +44,15 @@ export class GasClassifier {
     return capTime >= maxPast && capTime <= maxFuture;
   }
 
-  public static classifyWithHysteresis(
+  public classifyWithHysteresis(
     rawValue: number,
     currentStatus: GasStatusType,
   ): GasStatusType {
+    const { warningThreshold, dangerThreshold, hysteresisMargin } = this.config;
+
     if (currentStatus === 'DANGER') {
-      // Turun dari DANGER ke WARNING jika rawValue < (DANGER_THRESHOLD - HYSTERESIS_MARGIN)
-      if (rawValue < this.DANGER_THRESHOLD - this.HYSTERESIS_MARGIN) {
-        if (rawValue < this.WARNING_THRESHOLD - this.HYSTERESIS_MARGIN) {
+      if (rawValue < dangerThreshold - hysteresisMargin) {
+        if (rawValue < warningThreshold - hysteresisMargin) {
           return 'NORMAL';
         }
         return 'WARNING';
@@ -50,22 +61,20 @@ export class GasClassifier {
     }
 
     if (currentStatus === 'WARNING') {
-      // Naik ke DANGER jika rawValue >= DANGER_THRESHOLD
-      if (rawValue >= this.DANGER_THRESHOLD) {
+      if (rawValue >= dangerThreshold) {
         return 'DANGER';
       }
-      // Turun ke NORMAL jika rawValue < (WARNING_THRESHOLD - HYSTERESIS_MARGIN)
-      if (rawValue < this.WARNING_THRESHOLD - this.HYSTERESIS_MARGIN) {
+      if (rawValue < warningThreshold - hysteresisMargin) {
         return 'NORMAL';
       }
       return 'WARNING';
     }
 
     // Default currentStatus === 'NORMAL'
-    if (rawValue >= this.DANGER_THRESHOLD) {
+    if (rawValue >= dangerThreshold) {
       return 'DANGER';
     }
-    if (rawValue >= this.WARNING_THRESHOLD) {
+    if (rawValue >= warningThreshold) {
       return 'WARNING';
     }
     return 'NORMAL';
