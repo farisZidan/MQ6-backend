@@ -32,6 +32,9 @@ import { TelemetryConsumer } from './presentation/mqtt/telemetry.consumer';
 import { DashboardGateway } from './presentation/websocket/dashboard.gateway';
 import { SensorsController } from './presentation/http/sensors/sensors.controller';
 
+// Authentication
+import { AuthModule } from './infrastructure/auth/auth.module';
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -51,6 +54,7 @@ import { SensorsController } from './presentation/http/sensors/sensors.controlle
       SensorReadingEntity,
       GasEventEntity,
     ]),
+    AuthModule,
   ],
   controllers: [SensorsController],
   providers: [
