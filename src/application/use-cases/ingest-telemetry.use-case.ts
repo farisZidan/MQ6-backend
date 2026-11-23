@@ -3,13 +3,14 @@ import { DataSource } from 'typeorm';
 import { SensorReadingEntity } from '../../infrastructure/database/entities/sensor-reading.entity';
 import { DeviceEntity } from '../../infrastructure/database/entities/device.entity';
 import { GasEventEntity } from '../../infrastructure/database/entities/gas-event.entity';
+import { DashboardGateway } from '../../presentation/websocket/dashboard.gateway';
+import { SYSTEM_SETTING_REPOSITORY_PORT } from '../ports/system-setting.repository.port';
+import { SendDangerAlertUseCase } from './send-danger-alert.use-case';
+import type { ISystemSettingRepository } from '../ports/system-setting.repository.port';
 import {
   GasClassifier,
   GasStatusType,
 } from '../../domain/services/gas-classifier.service';
-import { DashboardGateway } from '../../presentation/websocket/dashboard.gateway';
-import { SYSTEM_SETTING_REPOSITORY_PORT } from '../ports/system-setting.repository.port';
-import type { ISystemSettingRepository } from '../ports/system-setting.repository.port';
 
 export interface TelemetryPayloadDto {
   messageId: string;
@@ -27,7 +28,8 @@ export class IngestTelemetryUseCase {
     private readonly dataSource: DataSource,
     private readonly dashboardGateway: DashboardGateway,
     @Inject(SYSTEM_SETTING_REPOSITORY_PORT)
-    private readonly settingRepo: ISystemSettingRepository, // <-- Injeksi Port
+    private readonly settingRepo: ISystemSettingRepository,
+    private readonly sendDangerAlertUseCase: SendDangerAlertUseCase, // <-- WAJIB
   ) {}
 
   async execute(payload: TelemetryPayloadDto): Promise<void> {
@@ -197,6 +199,16 @@ export class IngestTelemetryUseCase {
     if (isStatusChanged && eventToEmitGas) {
       this.dashboardGateway.server.emit('gas:status-change', eventToEmitGas);
       this.dashboardGateway.server.emit('event:new', eventToEmitGas);
+
+      if (nextGasStatus === 'DANGER') {
+        this.sendDangerAlertUseCase
+          .execute(deviceId, rawValue, nextGasStatus)
+          .catch((err) => {
+            this.logger.error(
+              `[Alert Error] Gagal kirim Telegram: ${err.message}`,
+            );
+          });
+      }
     }
 
     if (isDeviceReconnected) {
